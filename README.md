@@ -1,5 +1,7 @@
 # Codex Windows Fast Patch Skill
 
+[![LINUX DO](https://img.shields.io/badge/LINUX_DO-community-00aeef?style=flat-square)](https://linux.do/)
+
 Public, sanitized export of the `codex-windows-fast-patch` skill.
 
 This skill documents and automates a Windows Codex Desktop repatch workflow, including:
