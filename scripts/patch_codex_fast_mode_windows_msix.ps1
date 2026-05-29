@@ -545,7 +545,7 @@ function patchComputerUseAvailability(file) {
 
 function patchComputerUseInstallFlow(file) {
   const before = read(file);
-  if (!before.includes('featureName:`computer_use`') || !before.includes('openPluginInstall')) {
+  if (!before.includes('openPluginInstall') || !before.includes('installPlugin:async')) {
     process.stderr.write('computer-use-install-flow-target-not-found\n');
     process.exit(2);
   }
@@ -554,8 +554,14 @@ function patchComputerUseInstallFlow(file) {
     /([A-Za-z_$][\w$]*)=![A-Za-z_$][\w$]*\.isLoading&&[A-Za-z_$][\w$]*\.enabled,(?=[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.available,[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.available,)/,
     '$1=!0,'
   );
+  after = after.replace(
+    /([A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*\.available,(?=[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.available,[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.available,)/,
+    '$1=!0,'
+  );
 
-  if (after === before && !/featureName:`computer_use`[\s\S]*?=!0,[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.available,[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.available,/.test(before)) {
+  if (after === before &&
+      !/featureName:`computer_use`[\s\S]*?=!0,[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.available,[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.available,/.test(before) &&
+      !/=!0,[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.available,[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.available,/.test(before)) {
     process.stderr.write('computer-use-install-flow-patch-target-not-found\n');
     process.exit(2);
   }
@@ -659,6 +665,16 @@ function Find-PatchTargets {
         $text.Contains('openPluginInstall') -and
         $text.Contains('installPlugin:async')) {
       $computerUseInstallFlowTarget = $candidate
+    }
+  }
+  if ([string]::IsNullOrWhiteSpace($computerUseInstallFlowTarget)) {
+    foreach ($candidate in (Invoke-RgList $RgPath 'installPlugin:async' $assetsDir)) {
+      $text = Get-Content -Raw -LiteralPath $candidate
+      if ($text.Contains('openPluginInstall') -and
+          $text -match '=[A-Za-z_$][\w$]*\.available,[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.available,[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.available,') {
+        $computerUseInstallFlowTarget = $candidate
+        break
+      }
     }
   }
   if ([string]::IsNullOrWhiteSpace($computerUseAvailabilityTarget)) {
