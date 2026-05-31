@@ -246,8 +246,10 @@ function Enable-ComputerUseFeature {
     Copy-Item -LiteralPath $configPath -Destination "$configPath.computer-use-feature.bak" -Force
   }
   Set-TomlTableValue $configPath '[features]' 'computer_use' $true
+  Set-TomlTableValue $configPath '[windows]' 'sandbox' 'unelevated'
   Test-TomlSyntax $configPath
   Write-Log 'local feature enabled: features.computer_use = true'
+  Write-Log 'Windows sandbox mode set: windows.sandbox = unelevated'
 }
 
 function Register-LocalMarketplace {
@@ -330,6 +332,7 @@ if ($DryRun) {
 } else {
   $patchArgs += '-InstallPrerequisites'
   $patchArgs += '-Install'
+  $patchArgs += '-ForceRebuild'
   if (-not $NoLaunch) {
     $patchArgs += '-Launch'
   }
@@ -341,9 +344,6 @@ if ($DryRun) {
   }
   if (-not $SkipFastVerify) {
     $patchArgs += '-VerifyFastModeRequest'
-  }
-  if ($ForceRebuild) {
-    $patchArgs += '-ForceRebuild'
   }
 }
 

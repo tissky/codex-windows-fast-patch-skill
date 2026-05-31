@@ -188,6 +188,48 @@ function Invoke-ProcessWithTimeout {
   }
 }
 
+function Remove-DirectoryRobust {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [string]$RequiredRoot
+  )
+  if (-not (Test-Path -LiteralPath $Path)) {
+    return
+  }
+
+  $resolved = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).ProviderPath
+  if (-not [string]::IsNullOrWhiteSpace($RequiredRoot)) {
+    if (-not (Test-Path -LiteralPath $RequiredRoot)) {
+      Fail "safe deletion root does not exist: $RequiredRoot"
+    }
+    $root = (Resolve-Path -LiteralPath $RequiredRoot -ErrorAction Stop).ProviderPath.TrimEnd('\')
+    $comparison = [StringComparison]::OrdinalIgnoreCase
+    if ($resolved.Equals($root, $comparison) -or -not $resolved.StartsWith($root + '\', $comparison)) {
+      Fail "refusing to recursively delete outside safe root: $resolved"
+    }
+  }
+
+  $emptyDir = Join-Path ([System.IO.Path]::GetTempPath()) ('codex-empty-' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Force -Path $emptyDir | Out-Null
+  try {
+    & robocopy.exe $emptyDir $resolved /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
+    if ($LASTEXITCODE -gt 7) {
+      Write-Log "warning: robocopy empty mirror cleanup failed with exit code $LASTEXITCODE for $resolved"
+    }
+  } finally {
+    Remove-Item -LiteralPath $emptyDir -Recurse -Force -ErrorAction SilentlyContinue
+  }
+
+  Remove-Item -LiteralPath $resolved -Recurse -Force -ErrorAction SilentlyContinue
+  if (Test-Path -LiteralPath $resolved) {
+    try {
+      [System.IO.Directory]::Delete($resolved, $true)
+    } catch {
+      Fail "failed to remove directory: $resolved ($($_.Exception.Message))"
+    }
+  }
+}
+
 function Install-WindowsSdkBuildToolsViaNuGet {
   $cacheRoot = Join-Path $env:TEMP 'codex-windows-sdk-buildtools'
   $packageRoot = Join-Path $cacheRoot $WindowsSdkBuildToolsVersion
@@ -197,7 +239,7 @@ function Install-WindowsSdkBuildToolsViaNuGet {
   }
 
   if (Test-Path -LiteralPath $packageRoot) {
-    Remove-Item -LiteralPath $packageRoot -Recurse -Force
+    Remove-DirectoryRobust -Path $packageRoot -RequiredRoot $cacheRoot
   }
   New-Item -ItemType Directory -Force -Path $cacheRoot | Out-Null
   New-Item -ItemType Directory -Force -Path $packageRoot | Out-Null
@@ -276,7 +318,7 @@ function Copy-PackageLayout {
     [string]$WorkPackageRoot
   )
   if ((Test-Path -LiteralPath $WorkPackageRoot) -and $ForceRebuild) {
-    Remove-Item -LiteralPath $WorkPackageRoot -Recurse -Force
+    Remove-DirectoryRobust -Path $WorkPackageRoot -RequiredRoot (Split-Path -Parent $WorkPackageRoot)
   }
   if (-not (Test-Path -LiteralPath $WorkPackageRoot)) {
     New-Item -ItemType Directory -Force -Path $WorkPackageRoot | Out-Null
@@ -634,15 +676,28 @@ function Find-PatchTargets {
   }
 
   $goalSlashTarget = $null
-  foreach ($candidate in (Invoke-RgList $RgPath 'sourceMappingURL=slash-command-item' $assetsDir)) {
-    $goalSlashTarget = $candidate
-    break
+  foreach ($candidate in (Invoke-RgList $RgPath 'sourceMappingURL=slash-command-item|sourceMappingURL=local-remote-selection' $assetsDir)) {
+    $text = Get-Content -Raw -LiteralPath $candidate
+    if ((($text -match 'score:Math\.max\([A-Za-z_$][\w$]*\(e\.title,\w+\),[A-Za-z_$][\w$]*\(e\.id,\w+\)\)') -or
+         ($text -match 'score:[A-Za-z_$][\w$]*\(e\.title,\w+\)')) -and
+        $text.Contains('e.command.group??null') -and
+        $text.Contains('requiresEmptyComposer')) {
+      $goalSlashTarget = $candidate
+      break
+    }
+    if ($text.Contains('cmdk-item') -and
+        (($text -match 'keywords:\w+|keywords,\.\.\.') -or $text.Contains('keywords:r'))) {
+      $goalSlashTarget = $candidate
+      break
+    }
   }
   if ([string]::IsNullOrWhiteSpace($goalSlashTarget)) {
     foreach ($candidate in (Invoke-RgList $RgPath 'score:' $assetsDir)) {
       $text = Get-Content -Raw -LiteralPath $candidate
-      if (($text -match 'score:Math\.max\([A-Za-z_$][\w$]*\(e\.title,\w+\),[A-Za-z_$][\w$]*\(e\.id,\w+\)\)') -or
-          ($text -match 'score:[A-Za-z_$][\w$]*\(e\.title,\w+\)')) {
+      if (((($text -match 'score:Math\.max\([A-Za-z_$][\w$]*\(e\.title,\w+\),[A-Za-z_$][\w$]*\(e\.id,\w+\)\)') -or
+            ($text -match 'score:[A-Za-z_$][\w$]*\(e\.title,\w+\)')) -and
+           $text.Contains('e.command.group??null') -and
+           $text.Contains('requiresEmptyComposer'))) {
         $goalSlashTarget = $candidate
         break
       }
@@ -671,7 +726,8 @@ function Find-PatchTargets {
     foreach ($candidate in (Invoke-RgList $RgPath 'installPlugin:async' $assetsDir)) {
       $text = Get-Content -Raw -LiteralPath $candidate
       if ($text.Contains('openPluginInstall') -and
-          $text -match '=[A-Za-z_$][\w$]*\.available,[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.available,[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.available,') {
+          (($text -match '=[A-Za-z_$][\w$]*\.available,[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.available,[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.available,') -or
+           ($text -match '=!0,[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.available,[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.available,'))) {
         $computerUseInstallFlowTarget = $candidate
         break
       }
@@ -751,7 +807,7 @@ function Invoke-PatchAppAsar {
   $nodePath = (Get-RequiredCommand 'node').Source
 
   if (Test-Path -LiteralPath $extractDir) {
-    Remove-Item -LiteralPath $extractDir -Recurse -Force
+    Remove-DirectoryRobust -Path $extractDir -RequiredRoot $WorkDir
   }
   Write-Log 'extracting app.asar'
   Invoke-NpxAsar 'extract' $asarPath $extractDir
@@ -826,7 +882,11 @@ function Update-CodexExeAsarIntegrity {
   $pattern = '\[\{"file":"resources\\\\app\.asar","alg":"SHA256","value":"([0-9a-fA-F]{64})"\}\]'
   $match = [regex]::Match($text, $pattern)
   if (-not $match.Success) {
-    Fail 'could not find Electron ASAR integrity JSON inside Codex.exe'
+    if ($text.Contains('app.asar')) {
+      Fail 'could not find Electron ASAR integrity JSON inside Codex.exe'
+    }
+    Write-Log 'Codex.exe ASAR integrity JSON not present; skipping executable integrity update'
+    return
   }
   $oldHash = $match.Groups[1].Value
   if ($oldHash -eq $AsarHash) {
@@ -1292,7 +1352,7 @@ try {
 
   if ($CleanupAfter -and (Test-Path -LiteralPath $workRoot)) {
     Write-Log "cleanup build root: $workRoot"
-    Remove-Item -LiteralPath $workRoot -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-DirectoryRobust -Path $workRoot -RequiredRoot $OutputRoot
   }
 
   Write-Log 'done'
@@ -1300,6 +1360,6 @@ try {
   if ($KeepWorkDir) {
     Write-Log "keeping workdir: $tempWork"
   } elseif (Test-Path -LiteralPath $tempWork) {
-    Remove-Item -LiteralPath $tempWork -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-DirectoryRobust -Path $tempWork -RequiredRoot $workRoot
   }
 }

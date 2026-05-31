@@ -541,6 +541,9 @@ function Update-CodexConfig {
   Set-TomlTable $configPath '[plugins."computer-use@openai-bundled"]' @{
     enabled = $true
   }
+  Set-TomlTable $configPath '[windows]' @{
+    sandbox = 'unelevated'
+  }
 }
 
 function Test-TomlSyntax {
@@ -657,6 +660,9 @@ function Test-CodexConfig {
     if ($content -notmatch '(?ms)^\[plugins\."computer-use@openai-bundled"\]\s*\r?\n(?:(?!^\[).)*enabled\s*=\s*true') {
       throw 'config.toml is missing plugins."computer-use@openai-bundled".enabled=true'
     }
+    if ($content -notmatch '(?ms)^\[windows\]\s*\r?\n(?:(?!^\[).)*sandbox\s*=\s*[''"]unelevated[''"]') {
+      throw 'config.toml is missing windows.sandbox=unelevated'
+    }
     Write-Log 'warning: python not found; config source path was not semantically validated'
     return
   }
@@ -685,6 +691,12 @@ if not isinstance(plugin, dict):
     errors.append('missing [plugins."computer-use@openai-bundled"]')
 elif plugin.get("enabled") is not True:
     errors.append('plugins."computer-use@openai-bundled".enabled must be true')
+
+windows = data.get("windows", {})
+if not isinstance(windows, dict):
+    errors.append("missing [windows]")
+elif windows.get("sandbox") != "unelevated":
+    errors.append('windows.sandbox must be "unelevated"')
 
 if errors:
     for error in errors:
