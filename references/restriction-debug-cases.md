@@ -109,3 +109,16 @@ Action:
 - Do not block the repair.
 - Continue with the currently installed local skill.
 - Mention that self-update was skipped, then rely on local scripts and local evidence.
+
+## Manual ASAR Extraction Leaves Temp Directory
+
+Symptoms:
+
+- A manual `asar extract` verification succeeds, but deleting the extracted temp tree fails.
+- PowerShell reports a missing nested file such as `InfoPlist.strings` while deleting extracted `node_modules`.
+
+Action:
+
+- First verify the target directory is under the intended temp root and has the expected `codex-*` prefix.
+- If normal `Remove-Item -Recurse -Force` fails, use .NET deletion with a Windows long-path prefix: `[System.IO.Directory]::Delete("\\?\C:\path\to\temp-dir", $true)`.
+- Do not use this cleanup pattern on an unverified or computed path.
