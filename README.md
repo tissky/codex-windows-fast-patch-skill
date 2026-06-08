@@ -54,6 +54,7 @@ Copy-Item -Force -LiteralPath (Join-Path $source 'SKILL.md') -Destination $dest
 Copy-Item -Recurse -Force -LiteralPath (Join-Path $source 'agents') -Destination $dest
 Copy-Item -Recurse -Force -LiteralPath (Join-Path $source 'scripts') -Destination $dest
 Copy-Item -Recurse -Force -LiteralPath (Join-Path $source 'references') -Destination $dest
+Copy-Item -Recurse -Force -LiteralPath (Join-Path $source 'assets') -Destination $dest
 ```
 
 安装到 Codex 后，重启 Codex，让它重新加载 skill 元数据。

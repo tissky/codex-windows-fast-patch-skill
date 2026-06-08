@@ -1,11 +1,11 @@
 ---
 name: codex-windows-fast-patch
-description: Reapply the Windows Codex Desktop MSIX patch after Store upgrades, including Fast Mode request/UI gates, locale i18n, plugin UI gates, Chrome/browser_use gates, Goal command gates, Windows Computer Use availability gates, ASAR integrity repair, signing/installing the patched package, SDK cleanup, Fast Mode wire verification, and registering the local plugin marketplace openai-curated-local.
+description: Reapply the Windows Codex Desktop MSIX patch after Store upgrades, including Fast Mode request/UI gates, locale i18n, plugin UI gates, Chrome/browser_use gates, Goal command gates, Windows Computer Use availability gates, ASAR integrity repair, signing/installing the patched package, SDK cleanup, Fast Mode wire verification, registering the local plugin marketplace openai-curated-local, and optional custom model_instructions_file setup from a bundled prompt asset.
 ---
 
 # Codex Windows Fast Patch
 
-Use this skill when the user says Codex Desktop was upgraded and the Fast Mode / Plugins / Goal patch disappeared, asks to repatch Codex on Windows, asks to verify whether Fast Mode is really being sent, asks to restore/register the local plugin marketplace, or asks to enable Chrome browser use or Windows Computer Use in Codex Desktop. Also use it when the language/locale setting reverts after restart, browser or plugin entries are hidden by availability gates, the Computer Control settings page shows "Any App" / "任意应用" as disabled by organization or unavailable in the current region, or the Connections / Codex mobile remote-control setup flow drops into an auth error loop on Windows.
+Use this skill when the user says Codex Desktop was upgraded and the Fast Mode / Plugins / Goal patch disappeared, asks to repatch Codex on Windows, asks to verify whether Fast Mode is really being sent, asks to restore/register the local plugin marketplace, or asks to enable Chrome browser use or Windows Computer Use in Codex Desktop. Also use it when the language/locale setting reverts after restart, browser or plugin entries are hidden by availability gates, the Computer Control settings page shows "Any App" / "任意应用" as disabled by organization or unavailable in the current region, the Connections / Codex mobile remote-control setup flow drops into an auth error loop on Windows, or the user explicitly asks to configure the bundled custom `model_instructions_file` prompt asset.
 
 ## Platform Compatibility
 
@@ -88,6 +88,7 @@ It also patches the Desktop webview gates that otherwise hide or disable Windows
 It also writes `[windows] sandbox = "unelevated"` into `$env:USERPROFILE\.codex\config.toml`. On Windows, this avoids the elevated sandbox setup refresh path that can fail with `spawn setup refresh` / OS error 740 and break Computer Use startup.
 It also repairs local marketplace manifest layout when a local root has only a legacy root `marketplace.json`; the current Codex CLI expects `.agents\plugins\marketplace.json`, and missing that file can make `codex plugin list` fail for all configured marketplaces.
 It also patches the Codex mobile / remote-control setup flow so a missing ChatGPT Desktop remote-control auth token does not force the settings modal to navigate to `/login` and become hard to exit; the flow falls back to a safe empty state instead. This does not replace real server-side remote-control enrollment when cross-device control is actually required.
+It does not install the bundled custom `model_instructions_file` prompt by default. Only install it when the user explicitly requests that optional configuration.
 Any bundled script write to an existing `config.toml` first creates one timestamped backup for that script run under `.codex\backups\config\`.
 
 ## Important Guardrails
@@ -111,6 +112,7 @@ Remove-Item Env:ELECTRON_ENABLE_LOGGING -ErrorAction SilentlyContinue
 - For user-level Codex state backup or migration, use `scripts\manage-codex-backups.ps1`. It backs up `config.toml`, extracted `mcp_servers.json`, custom skills, marketplaces, and `chrome-native-hosts.json`. It excludes `.git`, `node_modules`, build output, and virtual environments by default; use `-IncludeDependencyDirs` only when an exact offline dependency copy is needed. Plugin cache and `.tmp\bundled-marketplaces` are also opt-in because they can be large.
 - If `codex plugin list` fails with `failed to load configured marketplace snapshot(s)` and a local marketplace root contains only `marketplace.json`, copy that manifest to `.agents\plugins\marketplace.json` and re-run `codex plugin list` before diagnosing individual plugins.
 - Do not depend on `Downloads\patch_codex_fast_mode_windows_msix.ps1`; the skill is intended to be self-contained. Use `scripts\patch_codex_fast_mode_windows_msix.ps1` unless the user explicitly passes `-PatchScript`.
+- Do not enable the bundled custom `model_instructions_file` prompt unless the user explicitly asks for it. Treat `assets\system-prompt.md` as an opaque asset; copy/configure it, but do not inspect or summarize its content unless the user separately asks to review the prompt.
 - If the user's upstream is CPA, verify CPA override rules as part of Fast Mode validation: for the Codex-facing models, force `service_tier` as a string parameter with value `priority`. Local wire capture only proves Codex Desktop sent the field; CPA can still strip, ignore, or fail to apply it unless the override rule is configured.
 - In Codex 26.601.2237+, Fast Mode may be gated in `webview\assets\read-service-tier-for-request-*.js` as an async helper shaped like `return authMethod===\`chatgpt\` ? featureRequirements?.fast_mode !== false : false`. The patch should remove the `chatgpt`-only branch while still reading the model/host feature requirement, then verify with the wire capture.
 - In Codex 26.601.2237+, Fast Mode may also stay invisible or disabled in the settings UI through `webview\assets\use-service-tier-settings-*.js`. The patch should connect the Fast UI patcher and log `fast-mode UI patch result`, not only patch the request helper.
@@ -138,6 +140,39 @@ Remove-Item Env:ELECTRON_ENABLE_LOGGING -ErrorAction SilentlyContinue
 - `-RegisterMarketplaceOnly`: only register `openai-curated-local`; do not patch Codex.
 - `-PatchScript <path>`: override the bundled patch script only when testing a newer patcher.
 - `-SkipComputerUse`: skip installing/verifying the local Computer Use compatibility plugin.
+- `-InstallModelInstructionsFile`: optional; copy the bundled prompt asset to `$env:USERPROFILE\.codex\prompts\system-prompt.md` and set top-level `model_instructions_file` in `$env:USERPROFILE\.codex\config.toml`.
+- `-ModelInstructionsSource <path>`: optional source override for `-InstallModelInstructionsFile`; defaults to `assets\system-prompt.md`.
+- `-ModelInstructionsDestination <path>`: optional destination override for `-InstallModelInstructionsFile`; defaults to `$env:USERPROFILE\.codex\prompts\system-prompt.md`.
+
+## Optional Model Instructions File
+
+This workflow has an optional custom model instructions installer. It is not part of the default repatch flow and should only run when the user asks for that extra configuration.
+
+To install only the bundled prompt asset and configure Codex:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.codex\skills\codex-windows-fast-patch\scripts\install-model-instructions-file.ps1"
+```
+
+The installer copies `assets\system-prompt.md` to `$env:USERPROFILE\.codex\prompts\system-prompt.md`, writes this top-level TOML entry, validates TOML syntax when Python is available, and logs a timestamped backup of any existing `config.toml`:
+
+```toml
+model_instructions_file = 'C:\Users\<user>\.codex\prompts\system-prompt.md'
+```
+
+To combine it with the main wrapper, add `-InstallModelInstructionsFile` explicitly:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.codex\skills\codex-windows-fast-patch\scripts\repatch-codex-windows.ps1" -InstallModelInstructionsFile
+```
+
+To verify the current machine without changing files:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.codex\skills\codex-windows-fast-patch\scripts\install-model-instructions-file.ps1" -VerifyOnly
+```
+
+After configuring `model_instructions_file`, restart Codex CLI/Desktop or start a new session so the new model instructions file is loaded.
 
 ## Computer Use Only
 

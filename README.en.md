@@ -15,6 +15,7 @@ This is the public version of the `codex-windows-fast-patch` skill. It guides ag
 - Refresh Windows Computer Use compatibility files.
 - Unlock the Computer Control `Any App` gate when the UI reports organization or region unavailability.
 - Keep the Codex Mobile / Connections remote-control setup flow from redirecting, error-looping, or becoming hard to close when remote-control auth is missing.
+- Optionally install a bundled custom `model_instructions_file` prompt asset when the user explicitly asks for that extra configuration.
 - Create a timestamped backup before overwriting `config.toml`, reducing the risk of accidental config loss.
 - Before each substantive use, automatically try syncing the latest workflow from GitHub so the local skill stays ready for newly discovered issues; network failures do not block the repair.
 
@@ -33,8 +34,10 @@ Do not run it on macOS. A macOS version needs a separate workflow for the Codex 
 - `scripts/repatch-codex-windows.ps1`: Workflow reference script.
 - `scripts/patch_codex_fast_mode_windows_msix.ps1`: MSIX / ASAR patch reference implementation.
 - `scripts/install-computer-use-local.ps1`: Windows Computer Use local compatibility reference implementation.
+- `scripts/install-model-instructions-file.ps1`: Optional installer for the bundled `model_instructions_file` prompt asset.
 - `scripts/manage-codex-backups.ps1`: Backup manager for local Codex config, MCP, skills, and marketplaces.
 - `scripts/update-skill-from-github.ps1`: Best-effort self-update script that syncs the latest GitHub version before use.
+- `assets/system-prompt.md`: Bundled prompt asset used only when optional model instructions setup is requested.
 - `references/restriction-debug-cases.md`: On-demand cases for restriction gates, Chrome/browser_use, Computer Use, mobile entry failures, and CPA Fast Mode.
 
 ## Install
@@ -54,6 +57,7 @@ Copy-Item -Force -LiteralPath (Join-Path $source 'SKILL.md') -Destination $dest
 Copy-Item -Recurse -Force -LiteralPath (Join-Path $source 'agents') -Destination $dest
 Copy-Item -Recurse -Force -LiteralPath (Join-Path $source 'scripts') -Destination $dest
 Copy-Item -Recurse -Force -LiteralPath (Join-Path $source 'references') -Destination $dest
+Copy-Item -Recurse -Force -LiteralPath (Join-Path $source 'assets') -Destination $dest
 ```
 
 After installing into Codex, restart Codex so it reloads skill metadata.
@@ -70,6 +74,7 @@ The scripts are reference implementations and operational templates, not a one-c
 
 - If Computer Use says the plugin is unavailable, shows `missing-helper-path`, breaks again after restart, or Chrome/browser helper paths, cache links, or native-host files are wrong: the current Codex Desktop session can use this skill; no other agent is required. Run `scripts/install-computer-use-local.ps1` or `scripts/install-computer-use-local.ps1 -VerifyOnly`, then restart Codex.
 - If plugin marketplace config is broken, `codex plugin list` fails because of marketplace manifests, or a local marketplace is missing `.agents\plugins\marketplace.json`: the current Codex Desktop session can use this skill; no other agent is required. Run `scripts/repatch-codex-windows.ps1 -RegisterMarketplaceOnly` or the local marketplace repair flow.
+- If the user explicitly asks to install the bundled custom model instructions prompt: run `scripts/install-model-instructions-file.ps1`, then restart Codex CLI/Desktop or start a new session.
 - If Fast Mode is missing or does not send `service_tier=priority`, plugin entries or install buttons are greyed out, Computer Control `Any App` is greyed out, Browser/Chrome/browser_use is greyed out, language resets to English after restart, Goal entries disappear, or Codex Mobile / Connections setup loops into login: these require patching Codex Desktop MSIX/ASAR. Prefer another agent or an external PowerShell for the full repatch so the current Desktop session is not interrupted while it stops and reinstalls itself.
 
 Example request: `Use the codex-windows-fast-patch skill to inspect and repair Codex Desktop Fast Mode, language/locale, Chrome browser_use, plugin marketplace, and Computer Use availability on this Windows machine.`

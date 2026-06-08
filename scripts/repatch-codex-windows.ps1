@@ -10,7 +10,10 @@ param(
   [switch]$SkipMarketplace,
   [switch]$SkipComputerUse,
   [switch]$RegisterMarketplaceOnly,
-  [switch]$ForceRebuild
+  [switch]$ForceRebuild,
+  [switch]$InstallModelInstructionsFile,
+  [string]$ModelInstructionsSource,
+  [string]$ModelInstructionsDestination = (Join-Path $env:USERPROFILE '.codex\prompts\system-prompt.md')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,6 +23,7 @@ if ([string]::IsNullOrWhiteSpace($PatchScript)) {
   $PatchScript = Join-Path $ScriptRoot 'patch_codex_fast_mode_windows_msix.ps1'
 }
 $ComputerUseScript = Join-Path $ScriptRoot 'install-computer-use-local.ps1'
+$ModelInstructionsScript = Join-Path $ScriptRoot 'install-model-instructions-file.ps1'
 $script:ConfigBackupBeforeOverwrite = @{}
 
 function Write-Log {
@@ -283,6 +287,24 @@ function Enable-ComputerUseFeature {
   Write-Log 'Windows sandbox mode set: windows.sandbox = unelevated'
 }
 
+function Invoke-ModelInstructionsInstaller {
+  if (-not (Test-Path -LiteralPath $ModelInstructionsScript)) {
+    throw "model instructions installer not found: $ModelInstructionsScript"
+  }
+
+  $args = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $ModelInstructionsScript)
+  if (-not [string]::IsNullOrWhiteSpace($ModelInstructionsSource)) {
+    $args += '-PromptSource'
+    $args += $ModelInstructionsSource
+  }
+  if (-not [string]::IsNullOrWhiteSpace($ModelInstructionsDestination)) {
+    $args += '-PromptDestination'
+    $args += $ModelInstructionsDestination
+  }
+
+  Invoke-Checked 'powershell' $args 'model instructions file install failed'
+}
+
 function Register-LocalMarketplace {
   param([string]$Path)
 
@@ -343,6 +365,10 @@ if (-not $SkipComputerUse) {
   }
 }
 
+if ($InstallModelInstructionsFile) {
+  Invoke-ModelInstructionsInstaller
+}
+
 if ($RegisterMarketplaceOnly) {
   Show-Status
   exit 0
@@ -387,6 +413,10 @@ if (-not $SkipComputerUse) {
     Invoke-ComputerUseInstaller -Stage 'post-patch refresh after Codex startup'
     Invoke-ComputerUseInstaller -Stage 'post-patch final verification' -VerifyOnly
   }
+}
+
+if ($InstallModelInstructionsFile) {
+  Invoke-Checked 'powershell' @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $ModelInstructionsScript, '-PromptDestination', $ModelInstructionsDestination, '-VerifyOnly') 'model instructions file verification failed'
 }
 
 Show-Status
