@@ -650,7 +650,7 @@ process.stdout.write('patched');
 
   Set-Content -LiteralPath $computerUsePatcherPath -Encoding UTF8 -Value @'
 const fs = require('node:fs');
-const [availabilityFile, installFlowFile, mobileSetupFile, mobileSetupFlowFile, remoteControlMainFile] = process.argv.slice(2);
+const [availabilityFile, installFlowFile, mobileSetupFile, mobileSetupFlowFile, remoteControlMainFile, remoteVisibilityFile] = process.argv.slice(2);
 let changed = false;
 
 function read(file) {
@@ -666,6 +666,27 @@ function writeIfChanged(file, before, after) {
     fs.writeFileSync(file, after);
     changed = true;
   }
+}
+
+function patchRemoteConnectionsVisibility(file) {
+  const before = read(file);
+  const alreadyPatched = before.includes('remote_connections') &&
+    /function [A-Za-z_$][\w$]*\(\)\{return !0\}/.test(before);
+  if (!before.includes('1042620455') || !before.includes('remote_connections')) {
+    if (alreadyPatched) return;
+    process.stderr.write('remote-connections-section-visibility-target-not-found\n');
+    process.exit(2);
+  }
+
+  const after = before.replace(
+    /function ([A-Za-z_$][\w$]*)\(\)\{return [A-Za-z_$][\w$]*\(`1042620455`\)\}/,
+    'function $1(){return !0}'
+  );
+  if (after === before && !alreadyPatched) {
+    process.stderr.write('remote-connections-section-visibility-patch-target-not-found\n');
+    process.exit(2);
+  }
+  writeIfChanged(file, before, after);
 }
 
 function patchComputerUseAvailability(file) {
@@ -763,9 +784,22 @@ function patchRemoteControlMain(file) {
     );
   }
 
+  after = after.replace(
+    /async refreshLocalRemoteControlClientId\(\)\{try\{let\{clientId:([A-Za-z_$][\w$]*)\}=await this\.getRemoteControlClientEnrollmentStatus\(\);this\.sharedObjectRepository\.set\(`local_remote_control_client_id`,\1\)\}catch\(([A-Za-z_$][\w$]*)\)\{([A-Za-z_$][\w$]*)\(\)\.warning\(`refresh_local_remote_control_client_id_failed`,\{safe:\{\},sensitive:\{error:\2\}\}\)\}\}/,
+    (_match, clientIdVar, errorVar, loggerFn) =>
+      `async refreshLocalRemoteControlClientId(){try{let{clientId:${clientIdVar}}=await this.getRemoteControlClientEnrollmentStatus();this.sharedObjectRepository.set(\`local_remote_control_client_id\`,${clientIdVar})}catch(${errorVar}){this.sharedObjectRepository.set(\`local_remote_control_client_id\`,\`codex-windows-local-fallback\`);let e=this.sharedObjectRepository.get(\`remote_control_connections_state\`);this.sharedObjectRepository.set(\`remote_control_connections_state\`,{...e,available:!0,accessRequired:!1,authRequired:!1,clientAuthorized:!0});${loggerFn}().warning(\`refresh_local_remote_control_client_id_failed\`,{safe:{fallback:\`windows-safe-empty-state\`},sensitive:{error:${errorVar}}})}}`
+  );
+
+  after = after.replace(
+    /async refreshRemoteControlClientAuthorizationState\(\)\{try\{let\{clientAuthorized:([A-Za-z_$][\w$]*),clientId:([A-Za-z_$][\w$]*)\}=await this\.getRemoteControlClientEnrollmentStatus\(\);this\.sharedObjectRepository\.set\(`local_remote_control_client_id`,\2\);let ([A-Za-z_$][\w$]*)=this\.sharedObjectRepository\.get\(`remote_control_connections_state`\);if\(\3==null\)return;this\.sharedObjectRepository\.set\(`remote_control_connections_state`,\{\.\.\.\3,clientAuthorized:\1\}\)\}catch\(([A-Za-z_$][\w$]*)\)\{([A-Za-z_$][\w$]*)\(\)\.warning\(`refresh_remote_control_client_authorization_state_failed`,\{safe:\{\},sensitive:\{error:\4\}\}\)\}\}/,
+    (_match, clientAuthorizedVar, clientIdVar, stateVar, errorVar, loggerFn) =>
+      `async refreshRemoteControlClientAuthorizationState(){try{let{clientAuthorized:${clientAuthorizedVar},clientId:${clientIdVar}}=await this.getRemoteControlClientEnrollmentStatus();this.sharedObjectRepository.set(\`local_remote_control_client_id\`,${clientIdVar});let ${stateVar}=this.sharedObjectRepository.get(\`remote_control_connections_state\`);if(${stateVar}==null)return;this.sharedObjectRepository.set(\`remote_control_connections_state\`,{...${stateVar},clientAuthorized:${clientAuthorizedVar}})}catch(${errorVar}){this.sharedObjectRepository.set(\`local_remote_control_client_id\`,\`codex-windows-local-fallback\`);let e=this.sharedObjectRepository.get(\`remote_control_connections_state\`);this.sharedObjectRepository.set(\`remote_control_connections_state\`,{...e,available:!0,accessRequired:!1,authRequired:!1,clientAuthorized:!0});${loggerFn}().warning(\`refresh_remote_control_client_authorization_state_failed\`,{safe:{fallback:\`windows-safe-empty-state\`},sensitive:{error:${errorVar}}})}}`
+  );
+
   if (after === before &&
       !before.includes('safe:{fallback:`windows-safe-empty-state`}') &&
-      !before.includes('clientAuthorized:!0}),sJ().warning(`load_remote_control_unauthed`')) {
+      !before.includes('refresh_local_remote_control_client_id_failed`,{safe:{fallback:`windows-safe-empty-state`}') &&
+      !before.includes('refresh_remote_control_client_authorization_state_failed`,{safe:{fallback:`windows-safe-empty-state`}')) {
     process.stderr.write('remote-control-main-patch-target-not-found\n');
     process.exit(2);
   }
@@ -777,6 +811,7 @@ patchComputerUseInstallFlow(installFlowFile);
 patchMobileSetup(mobileSetupFile);
 if (hasFile(mobileSetupFlowFile)) patchCodexMobileSetupFlow(mobileSetupFlowFile);
 patchRemoteControlMain(remoteControlMainFile);
+if (hasFile(remoteVisibilityFile)) patchRemoteConnectionsVisibility(remoteVisibilityFile);
 
 process.stdout.write(changed ? 'patched' : 'already-patched');
 '@
@@ -1176,6 +1211,27 @@ function Find-PatchTargets {
     Fail 'could not find remote-control main-process auth fallback target in extracted ASAR'
   }
 
+  $remoteConnectionVisibilityTarget = $null
+  foreach ($candidate in (Invoke-RgList $RgPath '1042620455' $assetsDir)) {
+    $text = Get-Content -Raw -LiteralPath $candidate
+    if ($text.Contains('remote_connections') -and $text.Contains('1042620455')) {
+      $remoteConnectionVisibilityTarget = $candidate
+      break
+    }
+  }
+  if ([string]::IsNullOrWhiteSpace($remoteConnectionVisibilityTarget)) {
+    foreach ($candidate in (Get-ChildItem -LiteralPath $assetsDir -Filter 'remote-connection-visibility-*.js' -File -ErrorAction SilentlyContinue)) {
+      $text = Get-Content -Raw -LiteralPath $candidate.FullName
+      if ($text.Contains('remote_connections')) {
+        $remoteConnectionVisibilityTarget = $candidate.FullName
+        break
+      }
+    }
+  }
+  if ([string]::IsNullOrWhiteSpace($remoteConnectionVisibilityTarget)) {
+    Fail 'could not find remote-control settings section visibility gate in extracted assets'
+  }
+
   Write-Log "fast-mode patch target: $fastModeTarget"
   Write-Log "fast-mode UI patch target: $fastModeUiTarget"
   Write-Log "locale i18n patch target: $localeI18nTarget"
@@ -1194,6 +1250,7 @@ function Find-PatchTargets {
   Write-Log "computer-use mobile setup patch target: $computerUseMobileSetupTarget"
   Write-Log "codex mobile setup-flow auth fallback target: $codexMobileSetupFlowTarget"
   Write-Log "remote-control main auth fallback target: $remoteControlMainTarget"
+  Write-Log "remote-control settings visibility patch target: $remoteConnectionVisibilityTarget"
 
   return [pscustomobject]@{
     FastMode = $fastModeTarget
@@ -1214,6 +1271,7 @@ function Find-PatchTargets {
     ComputerUseMobileSetup = $computerUseMobileSetupTarget
     CodexMobileSetupFlow = $codexMobileSetupFlowTarget
     RemoteControlMain = $remoteControlMainTarget
+    RemoteConnectionVisibility = $remoteConnectionVisibilityTarget
   }
 }
 
@@ -1281,6 +1339,7 @@ function Invoke-PatchAppAsar {
     [string]$targets.ComputerUseMobileSetup
     $(if ([string]::IsNullOrWhiteSpace($targets.CodexMobileSetupFlow)) { '__none__' } else { [string]$targets.CodexMobileSetupFlow })
     [string]$targets.RemoteControlMain
+    [string]$targets.RemoteConnectionVisibility
   )
   $computerUse = Invoke-NodePatcher $nodePath $patchers.ComputerUse $computerUseArgs
   Write-Log "computer-use gate patch result: $computerUse"
