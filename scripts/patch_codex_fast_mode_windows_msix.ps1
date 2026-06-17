@@ -18,6 +18,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $LogPrefix = '[codex-msix-patch-win]'
+$OutputRootWasExplicit = $PSBoundParameters.ContainsKey('OutputRoot')
 $WindowsSdkBuildToolsPackageId = 'microsoft.windows.sdk.buildtools'
 $WindowsSdkBuildToolsVersion = '10.0.26100.7705'
 $WindowsSdkInstallTimeoutSeconds = 300
@@ -122,6 +123,42 @@ function Find-CodexAppPath {
   }
 
   Fail 'could not find Windows Store/MSIX Codex app. Pass -AppPath explicitly.'
+}
+
+function Resolve-OutputRoot {
+  param(
+    [Parameter(Mandatory = $true)][string]$Candidate,
+    [bool]$WasExplicit
+  )
+  if ([string]::IsNullOrWhiteSpace($Candidate)) {
+    Fail 'OutputRoot is empty'
+  }
+
+  $expanded = [Environment]::ExpandEnvironmentVariables($Candidate)
+  $fullPath = [System.IO.Path]::GetFullPath($expanded)
+
+  $item = Get-Item -LiteralPath $fullPath -Force -ErrorAction SilentlyContinue
+  if ($item -and (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+    $targets = @($item.Target) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    $target = $targets | Select-Object -First 1
+    if (-not [string]::IsNullOrWhiteSpace($target) -and -not (Test-Path -LiteralPath $target)) {
+      try {
+        New-Item -ItemType Directory -Force -Path $target | Out-Null
+        Write-Log "recreated missing OutputRoot reparse target: $fullPath -> $target"
+      } catch {
+        if ($WasExplicit) {
+          Fail "OutputRoot is a broken reparse point and its target could not be recreated: $fullPath -> $target ($($_.Exception.Message))"
+        }
+        $fallback = Join-Path ([System.IO.Path]::GetTempPath()) 'codex-msix-repack'
+        Write-Log "warning: default OutputRoot is a broken reparse point and could not be repaired: $fullPath -> $target"
+        Write-Log "warning: falling back to temporary OutputRoot: $fallback"
+        $fullPath = [System.IO.Path]::GetFullPath($fallback)
+      }
+    }
+  }
+
+  New-Item -ItemType Directory -Force -Path $fullPath | Out-Null
+  return (Resolve-Path -LiteralPath $fullPath -ErrorAction Stop).ProviderPath
 }
 
 function Get-PackageRoot {
@@ -1744,6 +1781,7 @@ function Cleanup-WindowsSdk {
   }
 }
 
+$OutputRoot = Resolve-OutputRoot -Candidate $OutputRoot -WasExplicit $OutputRootWasExplicit
 $sourceApp = Find-CodexAppPath
 $sourcePackageRoot = Get-PackageRoot $sourceApp
 $packageShortId = Get-PackageShortId $sourcePackageRoot

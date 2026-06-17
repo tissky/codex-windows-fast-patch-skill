@@ -157,6 +157,7 @@ Remove-Item Env:ELECTRON_ENABLE_LOGGING -ErrorAction SilentlyContinue
 ```
 
 - If `makeappx.exe` or `signtool.exe` is missing, run the wrapper normally; it installs Windows SDK temporarily and removes it afterward.
+- If the dry run or repack fails early with `robocopy failed with exit code 16`, inspect the configured `-OutputRoot` before changing patch targets. A common Windows failure is a broken junction such as `Downloads\codex-msix-repack` pointing at a deleted build directory. The patch script now recreates a missing reparse target when possible and otherwise fails early with an actionable `OutputRoot is a broken reparse point` message. Pass a valid `-OutputRoot` on a large local drive if the default cannot be repaired.
 - If the local marketplace directory is missing, do not invent a marketplace. Report the missing path and ask whether to restore it from backup or re-extract it from a known source.
 - For user-level Codex state backup or migration, use `scripts\manage-codex-backups.ps1`. It backs up `config.toml`, extracted `mcp_servers.json`, custom skills, marketplaces, and `chrome-native-hosts.json`. It excludes `.git`, `node_modules`, build output, and virtual environments by default; use `-IncludeDependencyDirs` only when an exact offline dependency copy is needed. Plugin cache and `.tmp\bundled-marketplaces` are also opt-in because they can be large.
 - If `codex plugin list` fails with `failed to load configured marketplace snapshot(s)` and a local marketplace root contains only `marketplace.json`, copy that manifest to `.agents\plugins\marketplace.json` and re-run `codex plugin list` before diagnosing individual plugins.
@@ -183,6 +184,7 @@ Remove-Item Env:ELECTRON_ENABLE_LOGGING -ErrorAction SilentlyContinue
 - `-NoLaunch`: install but do not start Codex Desktop.
 - `-SkipFastVerify`: skip the WebSocket `service_tier` capture.
 - `-KeepBuild`: keep `Downloads\codex-msix-repack` for debugging.
+- `-OutputRoot <path>`: optional large local build root; use it when the default output root is short on space, points at a broken junction, or should be kept off the system drive.
 - `-SkipSdkCleanup`: leave Windows SDK installed.
 - `-RegisterMarketplaceOnly`: only register `openai-curated-local`; do not patch Codex.
 - `-PatchScript <path>`: override the bundled patch script only when testing a newer patcher.
@@ -195,7 +197,7 @@ Phone remote-control script options:
 
 - `scripts\patch-remote-control-windows-msix.ps1 -DryRun`: patch and validate extracted package without installing, then clean successful generated artifacts.
 - `-KeepWorkDir`: keep MSIX staging, ASAR extract, and script-local `npx` cache for debugging; avoid this on routine repairs because each kept run can consume multiple GB.
-- `-OutputRoot <path>`: optional large local build root; use it when the default temp drive is short on space.
+- `-OutputRoot <path>`: optional large local build root; use it when the default temp/output drive is short on space.
 - `-ReplacementResourceCodexExe <path>`: copy in a patched native app-server binary and verify remote-control markers before packaging.
 - `-Install -Launch -InstallPrerequisites`: sign, install, and relaunch the patched package after dry-run passes.
 
